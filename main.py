@@ -1,83 +1,51 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-
-# Importamos las funciones de nuestro motor matemático
 from splines_math import calcular_splines_cubicos_naturales, evaluar_splines
 
-# 1. Leer la imagen
-nombre_imagen = 'depredador.jpg'
-imagen = cv2.imread(nombre_imagen)
-
-if imagen is None:
-    print(f"Error: No se pudo cargar la imagen.")
-    exit()
-
+# 1. LECTURA
+imagen = cv2.imread('depredador.jpg')
+if imagen is None: print("Error"); exit()
 imagen_rgb = cv2.cvtColor(imagen, cv2.COLOR_BGR2RGB)
 imagen_gris = cv2.cvtColor(imagen, cv2.COLOR_BGR2GRAY)
 
-
-# ============================================================
-# 2. PROCESAMIENTO VISUAL (Lo que el profesor quiere ver)
-# ============================================================
-# Aplicamos el filtro Canny tal como lo sugiere el PDF
+# 2. CANNY
 bordes_canny = cv2.Canny(imagen_gris, 100, 200)
 
-
-# ============================================================
-# 3. EXTRACCIÓN ROBUSTA DEL CONTORNO (Nuestro secreto matemático)
-# ============================================================
-# Usamos la máscara binaria internamente para garantizar que
-# sacamos el contorno superior externo y no la malla del traje.
+# 3. MASCARA + LIMPIEZA MORFOLOGICA
 _, mascara = cv2.threshold(imagen_gris, 240, 255, cv2.THRESH_BINARY_INV)
+kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+mascara = cv2.morphologyEx(mascara, cv2.MORPH_CLOSE, kernel, iterations=3)
+mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel, iterations=1)
 
-puntos_x = []
-puntos_y = []
+# 4. CONTORNO COMPLETO
+contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+contorno = max(contornos, key=cv2.contourArea)
+pts_all = contorno.squeeze()
 
-# Escaneamos el área de interés (cabeza y cañón)
-for x in range(200, 480):
-    columna = mascara[:, x]
-    indices_y = np.where(columna == 255)[0]
-    
-    if len(indices_y) > 0:
-        puntos_x.append(x)
-        puntos_y.append(indices_y[0]) 
+# 5. SELECCION DE 60 NODOS
+N_NODOS = 60
+paso = len(pts_all) // N_NODOS
+indices = list(range(0, len(pts_all), paso))[:N_NODOS]
+nodos = pts_all[indices]
+t_nodos = list(range(len(nodos)))
+x_nodos = [int(p[0]) for p in nodos]
+y_nodos = [int(p[1]) for p in nodos]
 
-# ============================================================
-# 4. REDUCCIÓN DE PUNTOS Y CÁLCULO DE SPLINES
-# ============================================================
-nodos_x = puntos_x[::20]
-nodos_y = puntos_y[::20]
+# 6. SPLINES PARAMETRICOS: x(t) y y(t)
+ax, bx, cx, dx = calcular_splines_cubicos_naturales(t_nodos, x_nodos)
+t_spline, x_spline = evaluar_splines(t_nodos, ax, bx, cx, dx, puntos_por_tramo=20)
+ay, by, cy, dy = calcular_splines_cubicos_naturales(t_nodos, y_nodos)
+_, y_spline = evaluar_splines(t_nodos, ay, by, cy, dy, puntos_por_tramo=20)
+x_spline.append(float(x_nodos[0])); y_spline.append(float(y_nodos[0]))
 
-a, b, c, d = calcular_splines_cubicos_naturales(nodos_x, nodos_y)
-x_spline, y_spline = evaluar_splines(nodos_x, a, b, c, d, puntos_por_tramo=15)
-
-
-# ============================================================
-# 5. VISUALIZACIÓN FINAL PARA EL REPORTE
-# ============================================================
-plt.figure(figsize=(15, 6))
-
-# Gráfica 1
-plt.subplot(1, 3, 1)
-plt.title('Imagen Original')
-plt.imshow(imagen_rgb)
-
-# Gráfica 2: ¡Volvemos a los bordes Canny!
-plt.subplot(1, 3, 2)
-plt.title('Detección de Bordes (Canny)')
-plt.imshow(bordes_canny, cmap='gray')
-plt.axvline(x=200, color='blue', linestyle='--')
-plt.axvline(x=480, color='blue', linestyle='--')
-
-# Gráfica 3: El resultado de los Splines
-plt.subplot(1, 3, 3)
-plt.title('Ajuste de Splines Cúbicos')
-plt.imshow(imagen_rgb, alpha=0.3) # Imagen translúcida de fondo
-plt.plot(x_spline, y_spline, color='blue', linewidth=4, label='Curva Spline')
-plt.scatter(nodos_x, nodos_y, s=60, color='red', zorder=10, label='Nodos')
-
-plt.legend()
-plt.grid(True, linestyle=':', alpha=0.6)
-plt.tight_layout()
-plt.show()
+# 7. VISUALIZACION
+plt.figure(figsize=(18, 8))
+plt.subplot(1, 3, 1); plt.title('Imagen Original'); plt.imshow(imagen_rgb)
+plt.subplot(1, 3, 2); plt.title('Bordes (Canny)'); plt.imshow(bordes_canny, cmap='gray')
+plt.subplot(1, 3, 3); plt.title('Contorno - Spline Parametrico (60 nodos)')
+plt.imshow(imagen_rgb, alpha=0.3)
+plt.plot(x_spline, y_spline, color='blue', linewidth=2.5, label='Spline parametrico')
+plt.scatter(x_nodos, y_nodos, s=30, color='red', zorder=10, label='Nodos')
+plt.legend(fontsize=8); plt.grid(True, linestyle=':', alpha=0.4)
+plt.tight_layout(); plt.show()
